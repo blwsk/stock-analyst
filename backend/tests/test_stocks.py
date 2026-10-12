@@ -129,3 +129,36 @@ def test_window_rejects_invalid_queries(range_, timeframe, start, end, message):
 def test_get_bars_rejects_range_with_start():
     response = client.get("/stocks/bars", params={"tickers": "AAPL", "range": "1M", "start": "2026-09-01T00:00:00"})
     assert response.status_code == 422
+
+
+def test_get_snapshots(monkeypatch):
+    async def fake_get_snapshots(tickers):
+        assert tickers == ["AAPL", "MSFT"]
+        return [stock_data.Snapshot(ticker="AAPL", price=101, day_change=1, day_change_percent=1, volume=500)]
+
+    monkeypatch.setattr(stock_data, "get_snapshots", fake_get_snapshots)
+
+    response = client.get("/stocks/snapshots", params={"tickers": "aapl,MSFT"})
+    assert response.status_code == 200
+    assert response.json()[0]["price"] == 101
+
+
+@pytest.mark.parametrize("tickers", ["", "NOT A TICKER"])
+def test_get_snapshots_rejects_invalid_tickers(tickers):
+    assert client.get("/stocks/snapshots", params={"tickers": tickers}).status_code == 422
+
+
+def test_snapshot_changes_from_previous_close():
+    snapshot = stock_data._snapshot(
+        "AAPL",
+        {
+            "latestTrade": {"p": 110.0, "t": "2026-10-12T18:00:00Z"},
+            "dailyBar": {"v": 1234},
+            "prevDailyBar": {"c": 100.0},
+        },
+    )
+    assert (snapshot.price, snapshot.day_change, snapshot.day_change_percent, snapshot.volume) == (110, 10, 10, 1234)
+
+
+def test_snapshot_is_empty_for_unknown_tickers():
+    assert stock_data._snapshot("ZZZZ", None) == stock_data.Snapshot(ticker="ZZZZ")

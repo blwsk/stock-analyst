@@ -1,6 +1,10 @@
 export const API_URL =
   process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
+// At most one refresh of the same market data per 15s. Alpaca's free plan allows 200 requests a minute, and a
+// refresh is one request per page of bars.
+export const POLL_MS = 15_000;
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_URL}${path}`, init);
   if (!res.ok) {

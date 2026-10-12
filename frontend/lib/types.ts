@@ -12,6 +12,16 @@ export type TickerBars = {
   data: Bar[];
 };
 
+/** Mirrors Snapshot in backend/src/services/stock_data.py; fields are null for tickers with no data. */
+export type Snapshot = {
+  ticker: string;
+  price: number | null;
+  day_change: number | null;
+  day_change_percent: number | null;
+  volume: number | null;
+  updated_at: string | null;
+};
+
 export const TIMEFRAMES = ["1Min", "5Min", "15Min", "1Hour", "1Day"] as const;
 
 export type Timeframe = (typeof TIMEFRAMES)[number];

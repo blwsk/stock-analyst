@@ -5,7 +5,8 @@ import { useState } from "react";
 import useSWR, { useSWRConfig } from "swr";
 
 import PriceChart, { type Series } from "@/components/PriceChart";
-import { fetcher, patchJSON, postJSON } from "@/lib/api";
+import StockTable from "@/components/StockTable";
+import { fetcher, patchJSON, POLL_MS, postJSON } from "@/lib/api";
 import { formatBarTime, formatNoteTime } from "@/lib/marketTime";
 import { seriesColor } from "@/lib/seriesColors";
 import {
@@ -61,10 +62,6 @@ function sameConfig(a: ChartConfig, b: ChartConfig) {
     time(a.end) === time(b.end)
   );
 }
-
-// At most one refresh of the same bars per 15s. Alpaca's free plan allows 200 requests a minute, and a refresh is
-// one request per page of bars.
-const POLL_MS = 15_000;
 
 /** The default workspace name, e.g. "Analyzing AAPL, MSFT". */
 function workspaceName(tickers: string[]) {
@@ -383,6 +380,7 @@ export default function StockAnalyst({ workspace }: { workspace?: Workspace }) {
               No data for {tickers.join(", ")}.
             </p>
           )}
+          <StockTable tickers={tickers} />
         </section>
       )}
 

@@ -22,6 +22,31 @@ class TickerBars(BaseModel):
     data: list[Bar]
 
 
+class Snapshot(BaseModel):
+    """A ticker's latest price, its change since the previous session's close, and the latest session's volume.
+
+    Fields are null for tickers Alpaca has no data for.
+    """
+
+    ticker: str
+    price: float | None = None
+    day_change: float | None = None
+    day_change_percent: float | None = None
+    volume: int | None = None
+    # When the latest trade happened.
+    updated_at: datetime | None = None
+
+
+def _client() -> httpx.AsyncClient:
+    return httpx.AsyncClient(
+        base_url=settings.alpaca_data_url,
+        headers={
+            "APCA-API-KEY-ID": settings.alpaca_client_id,
+            "APCA-API-SECRET-KEY": settings.alpaca_client_secret,
+        },
+    )
+
+
 def _months_ago(d: date, months: int) -> date:
     years, month_index = divmod(d.month - 1 - months, 12)
     year, month = d.year + years, month_index + 1
@@ -106,13 +131,7 @@ async def get_bars(
         params["end"] = window_end.isoformat()
     bars: dict[str, list[Bar]] = {ticker: [] for ticker in tickers}
 
-    async with httpx.AsyncClient(
-        base_url=settings.alpaca_data_url,
-        headers={
-            "APCA-API-KEY-ID": settings.alpaca_client_id,
-            "APCA-API-SECRET-KEY": settings.alpaca_client_secret,
-        },
-    ) as client:
+    async with _client() as client:
         while True:
             # The limit is shared across symbols, so one symbol's bars can span several pages.
             response = await client.get("/v2/stocks/bars", params=params)
@@ -130,3 +149,31 @@ async def get_bars(
     if range_ in TRADING_DAY_RANGES:
         bars = {ticker: _last_sessions(data, TRADING_DAY_RANGES[range_]) for ticker, data in bars.items()}
     return [TickerBars(ticker=ticker, data=bars[ticker]) for ticker in tickers]
+
+
+def _snapshot(ticker: str, raw: dict | None) -> Snapshot:
+    """Convert one of Alpaca's snapshots; `raw` is None for tickers it has no data for."""
+    if not raw or not raw.get("latestTrade"):
+        return Snapshot(ticker=ticker)
+    price = raw["latestTrade"]["p"]
+    # dailyBar is the latest session, which is the previous trading day's on a weekend or before the open.
+    daily, previous = raw.get("dailyBar"), raw.get("prevDailyBar")
+    day_change = price - previous["c"] if previous else None
+    return Snapshot(
+        ticker=ticker,
+        price=price,
+        day_change=day_change,
+        day_change_percent=day_change / previous["c"] * 100 if previous and day_change is not None else None,
+        volume=daily["v"] if daily else None,
+        updated_at=raw["latestTrade"]["t"],
+    )
+
+
+async def get_snapshots(tickers: list[str]) -> list[Snapshot]:
+    """The latest snapshot for each of `tickers`, in the order of `tickers`."""
+    async with _client() as client:
+        # IEX, like the bars: the free plan's prices and volume come from that one exchange.
+        response = await client.get("/v2/stocks/snapshots", params={"symbols": ",".join(tickers), "feed": "iex"})
+        response.raise_for_status()
+        body = response.json()
+    return [_snapshot(ticker, body.get(ticker)) for ticker in tickers]
