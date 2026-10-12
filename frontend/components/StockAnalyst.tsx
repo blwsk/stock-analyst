@@ -62,6 +62,18 @@ function sameConfig(a: ChartConfig, b: ChartConfig) {
   );
 }
 
+/** The default workspace name, e.g. "Analyzing AAPL, MSFT". */
+function workspaceName(tickers: string[]) {
+  return `Analyzing ${tickers.join(", ")}`;
+}
+
+/** A ticker change, renamed to match; a workspace left with no tickers keeps its name. */
+function withTickers(tickers: string[]): Partial<Workspace> {
+  return tickers.length
+    ? { tickers, name: workspaceName(tickers) }
+    : { tickers };
+}
+
 /**
  * The ticker form and chart. Submitting the form adds the ticker to the open workspace, or creates a workspace for
  * it. Inside a workspace, chart option changes are kept locally until saved or reverted.
@@ -127,7 +139,7 @@ export default function StockAnalyst({ workspace }: { workspace?: Workspace }) {
   const createWorkspace = (symbol: string) =>
     run(async () => {
       const created = await postJSON<Workspace>("/workspaces", {
-        name: `Analyzing ${symbol}`,
+        name: workspaceName([symbol]),
         tickers: [symbol],
         chart: toConfig(chart),
       });
@@ -159,7 +171,7 @@ export default function StockAnalyst({ workspace }: { workspace?: Workspace }) {
   const saveChart = () => updateWorkspace({ chart: toConfig(chart) });
 
   const removeTicker = (ticker: string) =>
-    updateWorkspace({ tickers: tickers.filter((t) => t !== ticker) });
+    updateWorkspace(withTickers(tickers.filter((t) => t !== ticker)));
 
   return (
     <>
@@ -174,7 +186,7 @@ export default function StockAnalyst({ workspace }: { workspace?: Workspace }) {
           } else if (tickers.includes(value)) {
             setInput("");
           } else {
-            updateWorkspace({ tickers: [...tickers, value] }).then(
+            updateWorkspace(withTickers([...tickers, value])).then(
               (ok) => ok && setInput("")
             );
           }

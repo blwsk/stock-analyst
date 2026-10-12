@@ -1,6 +1,6 @@
 "use client";
 
-import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { PanelLeftClose, PanelLeftOpen, Plus } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
@@ -9,7 +9,7 @@ import useSWR from "swr";
 import { fetcher } from "@/lib/api";
 import type { Workspace } from "@/lib/types";
 
-const CREATED_FORMAT: Intl.DateTimeFormatOptions = {
+const UPDATED_FORMAT: Intl.DateTimeFormatOptions = {
   month: "short",
   day: "numeric",
   hour: "numeric",
@@ -19,7 +19,7 @@ const CREATED_FORMAT: Intl.DateTimeFormatOptions = {
 export default function SidePanel() {
   const [open, setOpen] = useState(true);
   const pathname = usePathname();
-  // The API returns workspaces newest first.
+  // The API returns workspaces most recently updated first.
   const workspaces = useSWR<Workspace[]>("/workspaces", fetcher);
 
   return (
@@ -29,9 +29,20 @@ export default function SidePanel() {
       {/* Collapsed, the panel is exactly the button's width (16px icon + 2 × 6px padding), so the page padding and the gap beside it match. */}
       <div className="flex items-center justify-between">
         {open && (
-          <h2 className="pl-2 text-sm font-medium text-zinc-700">
-            Stock Analyst
-          </h2>
+          <div className="flex items-center gap-1">
+            <h2 className="pl-2 text-sm font-medium text-zinc-700">
+              Stock Analyst
+            </h2>
+            {/* /workspace is the empty form; entering a ticker there creates the workspace. */}
+            <Link
+              href="/workspace"
+              aria-label="Create workspace"
+              title="Create workspace"
+              className="rounded p-1.5 text-zinc-500 hover:bg-zinc-300 hover:text-zinc-900"
+            >
+              <Plus className="size-4" />
+            </Link>
+          </div>
         )}
         <button
           type="button"
@@ -63,9 +74,9 @@ export default function SidePanel() {
                       {workspace.name}
                     </div>
                     <div className="text-xs text-zinc-500">
-                      {new Date(workspace.created_at).toLocaleString(
+                      {new Date(workspace.updated_at).toLocaleString(
                         undefined,
-                        CREATED_FORMAT
+                        UPDATED_FORMAT
                       )}
                     </div>
                   </Link>

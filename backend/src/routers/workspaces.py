@@ -24,7 +24,7 @@ async def create_workspace(body: schemas.WorkspaceCreate, conn: asyncpg.Connecti
 
 @router.get("", response_model=list[schemas.Workspace])
 async def list_workspaces(conn: asyncpg.Connection = Depends(get_connection)):
-    return [dict(row) for row in await conn.fetch("SELECT * FROM workspaces ORDER BY created_at DESC")]
+    return [dict(row) for row in await conn.fetch("SELECT * FROM workspaces ORDER BY updated_at DESC")]
 
 
 @router.get("/{workspace_id}", response_model=schemas.Workspace)
