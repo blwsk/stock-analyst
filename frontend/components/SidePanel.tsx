@@ -33,7 +33,7 @@ export default function SidePanel() {
             <h2 className="pl-2 text-sm font-medium text-zinc-700">
               Stock Analyst
             </h2>
-            {/* /workspace is the empty form; entering a ticker there creates the workspace. */}
+            {/* /workspace asks the agent to create workspaces. */}
             <Link
               href="/workspace"
               aria-label="Create workspace"
@@ -90,7 +90,7 @@ export default function SidePanel() {
               ? `Couldn't load workspaces: ${workspaces.error.message}`
               : workspaces.isLoading
                 ? "Loading…"
-                : "No workspaces yet. Enter a ticker to create one."}
+                : "No workspaces yet. Describe what you want to analyze to create one."}
           </div>
         ))}
     </aside>

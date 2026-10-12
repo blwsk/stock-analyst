@@ -1,5 +1,5 @@
-import StockAnalyst from "@/components/StockAnalyst";
+import AgentComposer from "@/components/AgentComposer";
 
 export default function Workspace() {
-  return <StockAnalyst />;
+  return <AgentComposer />;
 }
