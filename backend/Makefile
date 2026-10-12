@@ -1,8 +1,11 @@
-.PHONY: help install run test format lint clean
+.PHONY: help install db migrate reset-db run test format lint clean
 
 help:
 	@echo "Available commands:"
 	@echo "  make install    - Install dependencies"
+	@echo "  make db         - Run postgres in a container (foreground)"
+	@echo "  make migrate    - Run database migrations"
+	@echo "  make reset-db   - Downgrade all migrations and re-run them"
 	@echo "  make run        - Start the development server"
 	@echo "  make test       - Run tests"
 	@echo "  make format     - Format code with ruff"
@@ -11,6 +14,16 @@ help:
 
 install:
 	uv sync
+
+db:
+	docker compose up postgres
+
+migrate:
+	uv run alembic upgrade head
+
+reset-db:
+	uv run alembic downgrade base
+	uv run alembic upgrade head
 
 run:
 	uv run uvicorn src.main:app --reload --host 0.0.0.0 --port 8000

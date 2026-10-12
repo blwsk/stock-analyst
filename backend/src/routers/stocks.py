@@ -3,6 +3,7 @@ from datetime import datetime
 import httpx
 from fastapi import APIRouter, HTTPException, Query
 
+from src.constants import Range, Timeframe
 from src.services import stock_data
 
 router = APIRouter(prefix="/stocks", tags=["stocks"])
@@ -11,8 +12,8 @@ router = APIRouter(prefix="/stocks", tags=["stocks"])
 @router.get("/{ticker}/bars", response_model=list[stock_data.Bar])
 async def get_bars(
     ticker: str,
-    range_: stock_data.Range | None = Query(None, alias="range"),
-    timeframe: stock_data.Timeframe = "1Day",
+    range_: Range | None = Query(None, alias="range"),
+    timeframe: Timeframe = "1Day",
     start: datetime | None = None,
     end: datetime | None = None,
 ):

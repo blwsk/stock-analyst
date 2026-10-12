@@ -1,5 +1,12 @@
 [
   {
+    "name": "postgres",
+    "command": "make",
+    "args": ["local-db"],
+    "restart_delay": 10000,
+    "use_process_group": true
+  },
+  {
     "name": "backend",
     "command": "make",
     "args": ["local-backend"],

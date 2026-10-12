@@ -9,6 +9,10 @@ dependencies = [
     "pydantic>=2.9.0",
     "pydantic-settings>=2.6.0",
     "httpx>=0.28.1",
+    "alembic>=1.20.0",
+    "sqlalchemy>=2.1.4",
+    "psycopg[binary]>=3.3.6",
+    "asyncpg>=0.32.0",
 ]
 
 [build-system]
@@ -61,3 +65,7 @@ warn_unused_configs = true
 no_implicit_optional = true
 warn_redundant_casts = true
 warn_unused_ignores = true
+
+[[tool.mypy.overrides]]
+module = "asyncpg.*"
+ignore_missing_imports = true

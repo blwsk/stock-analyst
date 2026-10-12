@@ -3,6 +3,7 @@ from datetime import UTC, date, datetime, timedelta
 import pytest
 from fastapi.testclient import TestClient
 
+from src.constants import MARKET_TZ
 from src.main import app
 from src.services import stock_data
 
@@ -74,19 +75,19 @@ def test_last_sessions_keeps_most_recent_trading_days():
     assert stock_data._last_sessions(bars, 2) == bars[1:]
 
 
-NOW = datetime(2026, 10, 12, 12, 0, tzinfo=stock_data.MARKET_TZ)
+NOW = datetime(2026, 10, 12, 12, 0, tzinfo=MARKET_TZ)
 
 
 def test_window_for_range_counts_back_from_end():
-    end = datetime(2026, 6, 15, 16, 0, tzinfo=stock_data.MARKET_TZ)
+    end = datetime(2026, 6, 15, 16, 0, tzinfo=MARKET_TZ)
     start, window_end = stock_data._window("1M", "1Day", None, end, NOW)
-    assert (start, window_end) == (datetime(2026, 5, 15, tzinfo=stock_data.MARKET_TZ), end)
+    assert (start, window_end) == (datetime(2026, 5, 15, tzinfo=MARKET_TZ), end)
 
 
 def test_window_reads_naive_datetimes_as_market_time():
     start, end = stock_data._window(None, "5Min", datetime(2026, 10, 1, 9, 30), datetime(2026, 10, 2, 16, 0), NOW)
-    assert start == datetime(2026, 10, 1, 9, 30, tzinfo=stock_data.MARKET_TZ)
-    assert end == datetime(2026, 10, 2, 16, 0, tzinfo=stock_data.MARKET_TZ)
+    assert start == datetime(2026, 10, 1, 9, 30, tzinfo=MARKET_TZ)
+    assert end == datetime(2026, 10, 2, 16, 0, tzinfo=MARKET_TZ)
 
 
 def test_window_allows_long_spans_for_daily_bars():
