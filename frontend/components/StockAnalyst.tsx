@@ -62,6 +62,10 @@ function sameConfig(a: ChartConfig, b: ChartConfig) {
   );
 }
 
+// At most one refresh of the same bars per 15s. Alpaca's free plan allows 200 requests a minute, and a refresh is
+// one request per page of bars.
+const POLL_MS = 15_000;
+
 /** The default workspace name, e.g. "Analyzing AAPL, MSFT". */
 function workspaceName(tickers: string[]) {
   return `Analyzing ${tickers.join(", ")}`;
@@ -89,6 +93,8 @@ export default function StockAnalyst({ workspace }: { workspace?: Workspace }) {
   const [error, setError] = useState<string | null>(null);
   // While on, chart clicks place a note rather than select a window; saving a note turns it off.
   const [noteMode, setNoteMode] = useState(false);
+  // When bars last came back, including polls that returned the same data (which SWR doesn't re-render for).
+  const [refreshedAt, setRefreshedAt] = useState<number | null>(null);
 
   const tickers = workspace?.tickers ?? [];
   const notesKey = workspace ? `/workspaces/${workspace.id}/notes` : null;
@@ -106,8 +112,17 @@ export default function StockAnalyst({ workspace }: { workspace?: Workspace }) {
       ? `/stocks/bars?tickers=${encodeURIComponent(tickers.join(","))}&${span}&timeframe=${timeframe}`
       : null,
     fetcher,
-    // Keep showing the current lines while an added ticker's bars load.
-    { keepPreviousData: true }
+    {
+      // Keep showing the current lines while an added ticker's bars load.
+      keepPreviousData: true,
+      // Preset ranges run up to now, so poll for new bars; a custom window's end is fixed, so it can't change.
+      // SWR pauses polling while the tab is hidden.
+      refreshInterval: custom ? 0 : POLL_MS,
+      // Also caps SWR's other refreshes (on refocusing the tab, or remounting) at the same rate.
+      dedupingInterval: POLL_MS,
+      focusThrottleInterval: POLL_MS,
+      onSuccess: () => setRefreshedAt(Date.now()),
+    }
   );
   // Colored by position in the workspace, so a ticker keeps its color as others load; previous data may still
   // include a just-removed ticker.
@@ -342,15 +357,27 @@ export default function StockAnalyst({ workspace }: { workspace?: Workspace }) {
           ) : bars.error ? (
             <p className="text-sm text-red-600">Error: {bars.error.message}</p>
           ) : series.some((s) => s.data.length > 0) ? (
-            <PriceChart
-              series={series.filter((s) => s.data.length > 0)}
-              range={custom ? null : range}
-              timeframe={timeframe}
-              notes={notes.data ?? []}
-              noteMode={noteMode}
-              onSelect={(s, e) => setChart({ ...chart, start: s, end: e })}
-              onCreateNote={createNote}
-            />
+            <>
+              <PriceChart
+                series={series.filter((s) => s.data.length > 0)}
+                range={custom ? null : range}
+                timeframe={timeframe}
+                notes={notes.data ?? []}
+                noteMode={noteMode}
+                onSelect={(s, e) => setChart({ ...chart, start: s, end: e })}
+                onCreateNote={createNote}
+              />
+              {refreshedAt !== null && (
+                <p className="mt-1 text-right text-xs text-zinc-400">
+                  Last refreshed at{" "}
+                  {new Date(refreshedAt).toLocaleTimeString(undefined, {
+                    hour: "numeric",
+                    minute: "2-digit",
+                    second: "2-digit",
+                  })}
+                </p>
+              )}
+            </>
           ) : (
             <p className="text-sm text-zinc-600">
               No data for {tickers.join(", ")}.
