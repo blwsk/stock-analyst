@@ -1,5 +1,7 @@
 // Helpers for working with timestamps in US market time (America/New_York).
 
+import type { Timeframe } from "@/lib/types";
+
 export const MARKET_TZ = "America/New_York";
 
 export const TIMEFRAME_MS = {
@@ -10,7 +12,7 @@ export const TIMEFRAME_MS = {
   "1Day": 24 * 60 * 60_000,
 } as const;
 
-type MarketParts = {
+export type MarketParts = {
   year: number;
   month: number; // 1-12
   day: number;
@@ -68,4 +70,13 @@ export function formatMarketTime(
     timeZone: MARKET_TZ,
     ...options,
   }).format(ms);
+}
+
+/** A bar's time: just the date for daily bars, which stand for the close, otherwise date and time. */
+export function formatBarTime(ms: number, timeframe: Timeframe): string {
+  const date = formatMarketTime(ms, { dateStyle: "medium" });
+  // Joined by hand: Intl's combined dateStyle/timeStyle reads "Sep 21, 2026 at 9:00 AM".
+  return timeframe === "1Day"
+    ? date
+    : `${date}, ${formatMarketTime(ms, { timeStyle: "short" })}`;
 }

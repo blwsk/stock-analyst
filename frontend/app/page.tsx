@@ -4,7 +4,8 @@ import { useState } from "react";
 import useSWR from "swr";
 
 import PriceChart from "@/components/PriceChart";
-import { API_URL, fetcher } from "@/lib/api";
+import { fetcher } from "@/lib/api";
+import { formatBarTime } from "@/lib/marketTime";
 import {
   ALLOWED_TIMEFRAMES,
   DEFAULT_TIMEFRAME,
@@ -15,43 +16,32 @@ import {
   type Timeframe,
 } from "@/lib/types";
 
-type Health = { status: string };
-
 export default function Home() {
-  const health = useSWR<Health>("/health", fetcher);
   const [input, setInput] = useState("");
   const [ticker, setTicker] = useState<string | null>(null);
   const [range, setRange] = useState<Range>("1M");
   const [timeframe, setTimeframe] = useState<Timeframe>("1Day");
+  // Epoch ms of a window dragged out on the chart; when set, it overrides the range.
+  const [start, setStart] = useState<number | null>(null);
+  const [end, setEnd] = useState<number | null>(null);
+  const custom = start !== null && end !== null;
+  const span = custom
+    ? `start=${new Date(start).toISOString()}&end=${new Date(end).toISOString()}`
+    : `range=${range}`;
   const bars = useSWR<Bar[]>(
     ticker
-      ? `/stocks/${encodeURIComponent(ticker)}/bars?range=${range}&timeframe=${timeframe}`
+      ? `/stocks/${encodeURIComponent(ticker)}/bars?${span}&timeframe=${timeframe}`
       : null,
     fetcher
   );
+  const clearSelection = () => {
+    setStart(null);
+    setEnd(null);
+  };
 
   return (
     <main className="mx-auto max-w-3xl p-8">
       <h1 className="text-2xl font-semibold">Stock Analyst</h1>
-      <p className="mt-4 text-sm text-zinc-600">
-        Backend ({API_URL}):{" "}
-        <span
-          className={
-            health.error
-              ? "font-medium text-red-600"
-              : health.isLoading
-                ? "text-zinc-400"
-                : "font-medium text-green-600"
-          }
-        >
-          {health.isLoading
-            ? "checking…"
-            : health.error
-              ? `error: ${health.error.message}`
-              : health.data?.status}
-        </span>
-      </p>
-
       <form
         className="mt-8 flex gap-2"
         onSubmit={(e) => {
@@ -72,6 +62,7 @@ export default function Home() {
           onChange={(e) => {
             const next = e.target.value as Range;
             setRange(next);
+            clearSelection();
             if (!ALLOWED_TIMEFRAMES[next].includes(timeframe)) {
               setTimeframe(DEFAULT_TIMEFRAME[next]);
             }
@@ -107,16 +98,41 @@ export default function Home() {
       </form>
 
       {ticker && (
-        <section className="mt-8">
-          <h2 className="mb-4 text-lg font-medium">
-            {ticker} — {range} ({timeframe})
+        <section className="mt-6">
+          {custom && (
+            <div className="mb-4 inline-flex items-center gap-1 rounded-md bg-zinc-200 py-1 pr-1 pl-3 text-sm text-zinc-700">
+              {formatBarTime(start, timeframe)} →{" "}
+              {formatBarTime(end, timeframe)}
+              <button
+                type="button"
+                aria-label="Clear selected dates"
+                className="rounded px-1.5 text-zinc-500 hover:bg-zinc-300 hover:text-zinc-900"
+                onClick={clearSelection}
+              >
+                ✕
+              </button>
+            </div>
+          )}
+          <h2 className="text-lg font-medium">
+            {ticker}
           </h2>
+          <p className="mb-4 text-sm text-zinc-600">
+            {custom ? "Custom" : range} ({timeframe})
+          </p>
           {bars.isLoading ? (
             <p className="text-sm text-zinc-400">Loading…</p>
           ) : bars.error ? (
             <p className="text-sm text-red-600">Error: {bars.error.message}</p>
           ) : bars.data?.length ? (
-            <PriceChart bars={bars.data} range={range} timeframe={timeframe} />
+            <PriceChart
+              bars={bars.data}
+              range={custom ? null : range}
+              timeframe={timeframe}
+              onSelect={(s, e) => {
+                setStart(s);
+                setEnd(e);
+              }}
+            />
           ) : (
             <p className="text-sm text-zinc-600">No data for {ticker}.</p>
           )}

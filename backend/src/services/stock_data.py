@@ -1,5 +1,5 @@
 from calendar import monthrange
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from typing import Literal
 from zoneinfo import ZoneInfo
 
@@ -23,6 +23,15 @@ ALLOWED_TIMEFRAMES: dict[Range, list[Timeframe]] = {
 # Day ranges count trading sessions rather than calendar days, so "1D" is the latest session even on a weekend.
 TRADING_DAY_RANGES: dict[Range, int] = {"1D": 1, "5D": 5}
 MONTH_RANGES: dict[Range, int] = {"1M": 1, "6M": 6, "1Y": 12}
+
+# Longest custom start/end span per timeframe, matching the coarsest range each timeframe is allowed for above.
+MAX_SPAN: dict[Timeframe, timedelta | None] = {
+    "1Min": timedelta(days=31),
+    "5Min": timedelta(days=31),
+    "15Min": timedelta(days=31),
+    "1Hour": timedelta(days=366),
+    "1Day": None,
+}
 
 MARKET_TZ = ZoneInfo("America/New_York")
 
@@ -55,18 +64,67 @@ def _last_sessions(bars: list[Bar], sessions: int) -> list[Bar]:
     return [bar for bar in bars if bar.timestamp.astimezone(MARKET_TZ).date() in keep]
 
 
-async def get_bars(ticker: str, range_: Range = "1M", timeframe: Timeframe = "1Day") -> list[Bar]:
-    """Fetch `timeframe` bars for `ticker` covering `range_` from Alpaca."""
-    if timeframe not in ALLOWED_TIMEFRAMES[range_]:
-        raise ValueError(f"Timeframe {timeframe} is not supported for range {range_}")
+def _as_market_time(dt: datetime) -> datetime:
+    """Treat naive datetimes as New York time."""
+    return dt.replace(tzinfo=MARKET_TZ) if dt.tzinfo is None else dt
+
+
+def _window(
+    range_: Range | None,
+    timeframe: Timeframe,
+    start: datetime | None,
+    end: datetime | None,
+    now: datetime,
+) -> tuple[datetime, datetime | None]:
+    """Resolve the query to an explicit (start, end) window, validating it along the way.
+
+    Exactly one of `range_` and `start` must be given. `end` defaults to now; with a range, the range counts back
+    from `end`.
+    """
+    if (range_ is None) == (start is None):
+        raise ValueError("Pass either range or start, not both")
+    end = _as_market_time(end) if end is not None else None
+
+    if range_ is not None:
+        if timeframe not in ALLOWED_TIMEFRAMES[range_]:
+            raise ValueError(f"Timeframe {timeframe} is not supported for range {range_}")
+        anchor = (end or now).astimezone(MARKET_TZ).date()
+        return datetime.combine(_start_date(range_, anchor), time(), MARKET_TZ), end
+
+    assert start is not None
+    start = _as_market_time(start)
+    if start >= (end or now):
+        raise ValueError("start must be before end")
+    max_span = MAX_SPAN[timeframe]
+    if max_span is not None and (end or now) - start > max_span:
+        raise ValueError(f"Timeframe {timeframe} supports spans of at most {max_span.days} days")
+    return start, end
+
+
+async def get_bars(
+    ticker: str,
+    range_: Range | None = None,
+    timeframe: Timeframe = "1Day",
+    start: datetime | None = None,
+    end: datetime | None = None,
+) -> list[Bar]:
+    """Fetch `timeframe` bars for `ticker` from Alpaca, covering either `range_` or `start`–`end`.
+
+    With neither `range_` nor `start`, defaults to the last month.
+    """
+    if range_ is None and start is None:
+        range_ = "1M"
+    window_start, window_end = _window(range_, timeframe, start, end, datetime.now(MARKET_TZ))
 
     params: dict[str, str | int] = {
         "timeframe": timeframe,
-        "start": _start_date(range_, datetime.now(MARKET_TZ).date()).isoformat(),
+        "start": window_start.isoformat(),
         "limit": 10000,
         # The free plan only allows the IEX feed for recent data.
         "feed": "iex",
     }
+    if window_end is not None:
+        params["end"] = window_end.isoformat()
     bars: list[Bar] = []
 
     async with httpx.AsyncClient(
