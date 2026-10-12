@@ -15,40 +15,55 @@ def _bar(ts: datetime) -> stock_data.Bar:
 
 
 def test_get_bars(monkeypatch):
-    async def fake_get_bars(ticker, range_=None, timeframe="1Day", start=None, end=None):
-        assert (ticker, range_, timeframe, start, end) == ("AAPL", "5D", "5Min", None, None)
-        return [_bar(datetime(2026, 10, 9, tzinfo=UTC))]
+    async def fake_get_bars(tickers, range_=None, timeframe="1Day", start=None, end=None):
+        assert (tickers, range_, timeframe, start, end) == (["AAPL", "MSFT"], "5D", "5Min", None, None)
+        return [
+            stock_data.TickerBars(ticker="AAPL", data=[_bar(datetime(2026, 10, 9, tzinfo=UTC))]),
+            stock_data.TickerBars(ticker="MSFT", data=[]),
+        ]
 
     monkeypatch.setattr(stock_data, "get_bars", fake_get_bars)
 
-    response = client.get("/stocks/AAPL/bars", params={"range": "5D", "timeframe": "5Min"})
+    # Tickers are normalized and deduped, as for a workspace.
+    response = client.get("/stocks/bars", params={"tickers": "aapl, MSFT,AAPL", "range": "5D", "timeframe": "5Min"})
     assert response.status_code == 200
     assert response.json() == [
-        {"timestamp": "2026-10-09T00:00:00Z", "open": 1.0, "high": 2.0, "low": 0.5, "close": 1.5, "volume": 100}
+        {
+            "ticker": "AAPL",
+            "data": [
+                {"timestamp": "2026-10-09T00:00:00Z", "open": 1.0, "high": 2.0, "low": 0.5, "close": 1.5, "volume": 100}
+            ],
+        },
+        {"ticker": "MSFT", "data": []},
     ]
 
 
 def test_get_bars_rejects_unknown_params():
-    assert client.get("/stocks/AAPL/bars", params={"timeframe": "3Day"}).status_code == 422
-    assert client.get("/stocks/AAPL/bars", params={"range": "10Y"}).status_code == 422
+    assert client.get("/stocks/bars", params={"tickers": "AAPL", "timeframe": "3Day"}).status_code == 422
+    assert client.get("/stocks/bars", params={"tickers": "AAPL", "range": "10Y"}).status_code == 422
+
+
+@pytest.mark.parametrize("tickers", ["", " , ", "AAPL,NOT A TICKER"])
+def test_get_bars_rejects_invalid_tickers(tickers):
+    assert client.get("/stocks/bars", params={"tickers": tickers}).status_code == 422
 
 
 def test_get_bars_passes_start_and_end(monkeypatch):
-    async def fake_get_bars(ticker, range_=None, timeframe="1Day", start=None, end=None):
+    async def fake_get_bars(tickers, range_=None, timeframe="1Day", start=None, end=None):
         assert (range_, start, end) == (None, datetime(2026, 9, 1, 9, 30), datetime(2026, 9, 2, 16, 0, tzinfo=UTC))
         return []
 
     monkeypatch.setattr(stock_data, "get_bars", fake_get_bars)
 
     response = client.get(
-        "/stocks/AAPL/bars",
-        params={"start": "2026-09-01T09:30:00", "end": "2026-09-02T16:00:00Z", "timeframe": "5Min"},
+        "/stocks/bars",
+        params={"tickers": "AAPL", "start": "2026-09-01T09:30:00", "end": "2026-09-02T16:00:00Z", "timeframe": "5Min"},
     )
     assert response.status_code == 200
 
 
 def test_get_bars_rejects_timeframe_too_fine_for_range():
-    response = client.get("/stocks/AAPL/bars", params={"range": "1Y", "timeframe": "1Min"})
+    response = client.get("/stocks/bars", params={"tickers": "AAPL", "range": "1Y", "timeframe": "1Min"})
     assert response.status_code == 422
 
 
@@ -112,5 +127,5 @@ def test_window_rejects_invalid_queries(range_, timeframe, start, end, message):
 
 
 def test_get_bars_rejects_range_with_start():
-    response = client.get("/stocks/AAPL/bars", params={"range": "1M", "start": "2026-09-01T00:00:00"})
+    response = client.get("/stocks/bars", params={"tickers": "AAPL", "range": "1M", "start": "2026-09-01T00:00:00"})
     assert response.status_code == 422

@@ -6,7 +6,8 @@ import {
 } from "@/lib/marketTime";
 import type { Timeframe } from "@/lib/types";
 
-export type Point = { t: number; close: number };
+/** A chart row; only its epoch-ms time matters to the axis. */
+export type Point = { t: number };
 
 /** Spacing between ticks on evenly spaced (category) axes, finest first. */
 export const TICK_PERIODS = [
@@ -60,7 +61,7 @@ function periodKey(p: MarketParts, period: TickPeriod): string {
 }
 
 function ticksFor(
-  points: Point[],
+  points: readonly Point[],
   parts: MarketParts[],
   period: TickPeriod,
   labelFirst: boolean
@@ -79,7 +80,7 @@ function ticksFor(
  * and leaves at most MAX_TICKS ticks.
  */
 export function periodTicks(
-  points: Point[],
+  points: readonly Point[],
   timeframe: Timeframe,
   // 5D data is trimmed to whole sessions, so its first bar starts a day. Other ranges (and custom
   // windows) start mid-period, so skip their first bar rather than label a partial period.
@@ -99,7 +100,10 @@ export function periodTicks(
  * Domain and hourly ticks for a single regular session (9:30-16:00 market time), plus the points
  * that fall inside it. Bars overlapping the open (e.g. the 9:00 hourly bar) are clamped to it.
  */
-export function sessionAxis(points: Point[], timeframe: Timeframe) {
+export function sessionAxis<P extends Point>(
+  points: P[],
+  timeframe: Timeframe
+) {
   const p = marketParts(points[points.length - 1].t);
   const open = marketTimeToMs(p.year, p.month, p.day, 9, 30);
   const close = marketTimeToMs(p.year, p.month, p.day, 16, 0);

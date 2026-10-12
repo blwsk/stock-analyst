@@ -17,6 +17,11 @@ class Bar(BaseModel):
     volume: int
 
 
+class TickerBars(BaseModel):
+    ticker: str
+    data: list[Bar]
+
+
 def _months_ago(d: date, months: int) -> date:
     years, month_index = divmod(d.month - 1 - months, 12)
     year, month = d.year + years, month_index + 1
@@ -74,21 +79,23 @@ def _window(
 
 
 async def get_bars(
-    ticker: str,
+    tickers: list[str],
     range_: Range | None = None,
     timeframe: Timeframe = "1Day",
     start: datetime | None = None,
     end: datetime | None = None,
-) -> list[Bar]:
-    """Fetch `timeframe` bars for `ticker` from Alpaca, covering either `range_` or `start`–`end`.
+) -> list[TickerBars]:
+    """Fetch `timeframe` bars for each of `tickers` from Alpaca, covering either `range_` or `start`–`end`.
 
-    With neither `range_` nor `start`, defaults to the last month.
+    Returned in the order of `tickers`, with an empty `data` list for tickers Alpaca has no bars for. With neither
+    `range_` nor `start`, defaults to the last month.
     """
     if range_ is None and start is None:
         range_ = "1M"
     window_start, window_end = _window(range_, timeframe, start, end, datetime.now(MARKET_TZ))
 
     params: dict[str, str | int] = {
+        "symbols": ",".join(tickers),
         "timeframe": timeframe,
         "start": window_start.isoformat(),
         "limit": 10000,
@@ -97,7 +104,7 @@ async def get_bars(
     }
     if window_end is not None:
         params["end"] = window_end.isoformat()
-    bars: list[Bar] = []
+    bars: dict[str, list[Bar]] = {ticker: [] for ticker in tickers}
 
     async with httpx.AsyncClient(
         base_url=settings.alpaca_data_url,
@@ -107,17 +114,19 @@ async def get_bars(
         },
     ) as client:
         while True:
-            response = await client.get(f"/v2/stocks/{ticker.upper()}/bars", params=params)
+            # The limit is shared across symbols, so one symbol's bars can span several pages.
+            response = await client.get("/v2/stocks/bars", params=params)
             response.raise_for_status()
             body = response.json()
-            bars.extend(
-                Bar(timestamp=b["t"], open=b["o"], high=b["h"], low=b["l"], close=b["c"], volume=b["v"])
-                for b in body["bars"] or []
-            )
+            for ticker, ticker_bars in (body["bars"] or {}).items():
+                bars.setdefault(ticker, []).extend(
+                    Bar(timestamp=b["t"], open=b["o"], high=b["h"], low=b["l"], close=b["c"], volume=b["v"])
+                    for b in ticker_bars
+                )
             if not body.get("next_page_token"):
                 break
             params["page_token"] = body["next_page_token"]
 
     if range_ in TRADING_DAY_RANGES:
-        return _last_sessions(bars, TRADING_DAY_RANGES[range_])
-    return bars
+        bars = {ticker: _last_sessions(data, TRADING_DAY_RANGES[range_]) for ticker, data in bars.items()}
+    return [TickerBars(ticker=ticker, data=bars[ticker]) for ticker in tickers]

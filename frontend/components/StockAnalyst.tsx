@@ -4,17 +4,18 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import useSWR, { useSWRConfig } from "swr";
 
-import PriceChart from "@/components/PriceChart";
+import PriceChart, { type Series } from "@/components/PriceChart";
 import { fetcher, patchJSON, postJSON } from "@/lib/api";
 import { formatBarTime } from "@/lib/marketTime";
+import { seriesColor } from "@/lib/seriesColors";
 import {
   ALLOWED_TIMEFRAMES,
   DEFAULT_TIMEFRAME,
   RANGES,
   TIMEFRAMES,
-  type Bar,
   type ChartConfig,
   type Range,
+  type TickerBars,
   type Timeframe,
   type Workspace,
 } from "@/lib/types";
@@ -61,8 +62,8 @@ function sameConfig(a: ChartConfig, b: ChartConfig) {
 }
 
 /**
- * The ticker form and chart. Submitting the form creates a workspace and opens it, or fills in the ticker of a
- * workspace that has none. Inside a workspace, chart option changes are kept locally until saved or reverted.
+ * The ticker form and chart. Submitting the form adds the ticker to the open workspace, or creates a workspace for
+ * it. Inside a workspace, chart option changes are kept locally until saved or reverted.
  */
 export default function StockAnalyst({ workspace }: { workspace?: Workspace }) {
   const router = useRouter();
@@ -74,7 +75,7 @@ export default function StockAnalyst({ workspace }: { workspace?: Workspace }) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const ticker = workspace?.tickers[0] ?? null;
+  const tickers = workspace?.tickers ?? [];
   const { range, timeframe, start, end } = chart;
   const custom = start !== null && end !== null;
   const saved = toConfig(fromConfig(workspace?.chart ?? null));
@@ -83,12 +84,24 @@ export default function StockAnalyst({ workspace }: { workspace?: Workspace }) {
   const span = custom
     ? `start=${new Date(start).toISOString()}&end=${new Date(end).toISOString()}`
     : `range=${range}`;
-  const bars = useSWR<Bar[]>(
-    ticker
-      ? `/stocks/${encodeURIComponent(ticker)}/bars?${span}&timeframe=${timeframe}`
+  const bars = useSWR<TickerBars[]>(
+    tickers.length
+      ? `/stocks/bars?tickers=${encodeURIComponent(tickers.join(","))}&${span}&timeframe=${timeframe}`
       : null,
-    fetcher
+    fetcher,
+    // Keep showing the current lines while an added ticker's bars load.
+    { keepPreviousData: true }
   );
+  // Colored by position in the workspace, so a ticker keeps its color as others load; previous data may still
+  // include a just-removed ticker.
+  const series: Series[] = (bars.data ?? []).flatMap(({ ticker, data }) =>
+    tickers.includes(ticker)
+      ? [{ ticker, data, color: seriesColor(tickers.indexOf(ticker)) }]
+      : []
+  );
+  // Only once the response includes the ticker; while an added ticker loads, the previous data lacks it.
+  const noData = (ticker: string) =>
+    bars.data?.some((s) => s.ticker === ticker && s.data.length === 0);
   const clearSelection = () => setChart({ ...chart, start: null, end: null });
 
   /** Runs a save or create, tracking whether it's in flight and showing any error. Resolves to whether it worked. */
@@ -130,10 +143,8 @@ export default function StockAnalyst({ workspace }: { workspace?: Workspace }) {
 
   const saveChart = () => updateWorkspace({ chart: toConfig(chart) });
 
-  const removeTicker = () =>
-    updateWorkspace({
-      tickers: workspace!.tickers.filter((t) => t !== ticker),
-    });
+  const removeTicker = (ticker: string) =>
+    updateWorkspace({ tickers: tickers.filter((t) => t !== ticker) });
 
   return (
     <>
@@ -143,33 +154,38 @@ export default function StockAnalyst({ workspace }: { workspace?: Workspace }) {
           e.preventDefault();
           const value = input.trim().toUpperCase();
           if (!value) return;
-          if (workspace && !ticker) {
-            updateWorkspace({ tickers: [value] }).then(
+          if (!workspace) {
+            createWorkspace(value);
+          } else if (tickers.includes(value)) {
+            setInput("");
+          } else {
+            updateWorkspace({ tickers: [...tickers, value] }).then(
               (ok) => ok && setInput("")
             );
-          } else {
-            createWorkspace(value);
           }
         }}
       >
-        <div className="flex items-center gap-1 rounded border border-zinc-300 px-1.5 focus-within:border-zinc-500">
-          {ticker && (
-            <span className="inline-flex items-center gap-0.5 rounded bg-zinc-200 py-0.5 pr-0.5 pl-2 text-sm font-medium text-zinc-700">
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1 rounded border border-zinc-300 px-1.5 focus-within:border-zinc-500">
+          {tickers.map((ticker) => (
+            <span
+              key={ticker}
+              className="inline-flex items-center gap-0.5 rounded bg-zinc-200 py-0.5 pr-0.5 pl-2 text-sm font-medium text-zinc-700"
+            >
               {ticker}
               <button
                 type="button"
                 aria-label={`Remove ${ticker} from workspace`}
                 disabled={pending}
                 className="rounded px-1 text-zinc-500 hover:bg-zinc-300 hover:text-zinc-900 disabled:opacity-50"
-                onClick={removeTicker}
+                onClick={() => removeTicker(ticker)}
               >
                 ✕
               </button>
             </span>
-          )}
+          ))}
           <input
-            className="min-w-0 px-1.5 py-1.5 outline-none"
-            placeholder={ticker ? "" : "Ticker, e.g. AAPL"}
+            className="min-w-16 flex-1 px-1.5 py-1.5 outline-none"
+            placeholder={tickers.length ? "Add a ticker" : "Ticker, e.g. AAPL"}
             aria-label="Ticker"
             value={input}
             onChange={(e) => setInput(e.target.value)}
@@ -223,7 +239,7 @@ export default function StockAnalyst({ workspace }: { workspace?: Workspace }) {
       </form>
       {error && <p className="mt-2 text-sm text-red-600">Error: {error}</p>}
 
-      {ticker && (
+      {tickers.length > 0 && (
         <section className="mt-6">
           {custom && (
             <div className="mb-4 inline-flex items-center gap-1 rounded-md bg-zinc-200 py-1 pr-1 pl-3 text-sm text-zinc-700">
@@ -241,7 +257,18 @@ export default function StockAnalyst({ workspace }: { workspace?: Workspace }) {
           )}
           <div className="flex items-start justify-between gap-4">
             <div>
-              <h2 className="text-lg font-medium">{ticker}</h2>
+              <h2 className="flex flex-wrap gap-x-3 text-lg font-medium">
+                {tickers.map((ticker, i) => (
+                  <span key={ticker} style={{ color: seriesColor(i) }}>
+                    {ticker}
+                    {noData(ticker) && (
+                      <span className="ml-1 text-sm font-normal text-zinc-400">
+                        (no data)
+                      </span>
+                    )}
+                  </span>
+                ))}
+              </h2>
               <p className="mb-4 text-sm text-zinc-600">
                 {custom ? "Custom" : range} ({timeframe})
               </p>
@@ -267,19 +294,21 @@ export default function StockAnalyst({ workspace }: { workspace?: Workspace }) {
               </div>
             )}
           </div>
-          {bars.isLoading ? (
+          {bars.isLoading && !bars.data ? (
             <p className="text-sm text-zinc-400">Loading…</p>
           ) : bars.error ? (
             <p className="text-sm text-red-600">Error: {bars.error.message}</p>
-          ) : bars.data?.length ? (
+          ) : series.some((s) => s.data.length > 0) ? (
             <PriceChart
-              bars={bars.data}
+              series={series.filter((s) => s.data.length > 0)}
               range={custom ? null : range}
               timeframe={timeframe}
               onSelect={(s, e) => setChart({ ...chart, start: s, end: e })}
             />
           ) : (
-            <p className="text-sm text-zinc-600">No data for {ticker}.</p>
+            <p className="text-sm text-zinc-600">
+              No data for {tickers.join(", ")}.
+            </p>
           )}
         </section>
       )}

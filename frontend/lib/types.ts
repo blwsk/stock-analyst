@@ -7,6 +7,11 @@ export type Bar = {
   volume: number;
 };
 
+export type TickerBars = {
+  ticker: string;
+  data: Bar[];
+};
+
 export const TIMEFRAMES = ["1Min", "5Min", "15Min", "1Hour", "1Day"] as const;
 
 export type Timeframe = (typeof TIMEFRAMES)[number];

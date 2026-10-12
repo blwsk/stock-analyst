@@ -1,14 +1,22 @@
 "use client";
 
-import { useRef, useState, type PointerEvent } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type PointerEvent,
+  type RefObject,
+} from "react";
 import {
   CartesianGrid,
   Line,
   LineChart,
   ResponsiveContainer,
   Tooltip,
+  usePlotArea,
   XAxis,
   YAxis,
+  type PlotArea,
 } from "recharts";
 
 import {
@@ -20,15 +28,33 @@ import {
 import { formatBarTime, formatMarketTime, marketParts } from "@/lib/marketTime";
 import type { Bar, Range, Timeframe } from "@/lib/types";
 
+export type Series = { ticker: string; data: Bar[]; color: string };
+
+/** One row per bar time, with each ticker's close at that time. */
+type Row = Point & { values: Record<string, number> };
+
+/** Merges the series by time; tickers can miss bars the others have (IEX skips quiet minutes). */
+function toRows(series: Series[]): Row[] {
+  const rows = new Map<number, Row>();
+  for (const { ticker, data } of series) {
+    for (const bar of data) {
+      const t = Date.parse(bar.timestamp);
+      let row = rows.get(t);
+      if (!row) rows.set(t, (row = { t, values: {} }));
+      row.values[ticker] = bar.close;
+    }
+  }
+  return [...rows.values()].sort((a, b) => a.t - b.t);
+}
+
 const AXIS_TICK = { fontSize: 12 };
 
 const HEIGHT = 300;
+// The right margin leaves room for the last x-axis label.
 const MARGIN = { top: 10, right: 32, bottom: 5, left: 5 };
-// Recharts' default axis sizes, set explicitly so drag selection can locate the plot area.
-const Y_AXIS_WIDTH = 60;
-const X_AXIS_HEIGHT = 30;
-const PLOT_LEFT = MARGIN.left + Y_AXIS_WIDTH;
-const PLOT_HEIGHT = HEIGHT - MARGIN.top - MARGIN.bottom - X_AXIS_HEIGHT;
+// Space between stacked y-axes, and recharts' default gap between a tick mark and its label.
+const Y_AXIS_GAP = 8;
+const TICK_MARGIN = 2;
 // Shorter drags are treated as clicks.
 const MIN_DRAG_PX = 3;
 
@@ -49,26 +75,41 @@ const TICK_FORMATS: Record<TickPeriod, Intl.DateTimeFormatOptions> = {
   "2Month": { month: "short" },
 };
 
+/**
+ * Keeps `plotRef` pointing at the plot area recharts laid out. The y-axes size to their labels, so the plot's
+ * position can't be computed up front; drag selection reads it from here.
+ */
+function PlotAreaTracker({ plotRef }: { plotRef: RefObject<PlotArea | null> }) {
+  const area = usePlotArea();
+  useEffect(() => {
+    plotRef.current = area ?? null;
+  }, [area, plotRef]);
+  return null;
+}
+
 export default function PriceChart({
-  bars,
+  series,
   range,
   timeframe,
   onSelect,
 }: {
-  bars: Bar[];
+  series: Series[];
   /** null for a custom start/end window. */
   range: Range | null;
   timeframe: Timeframe;
   onSelect: (start: number, end: number) => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
-  // Drag positions in px from the container's left edge.
-  const [drag, setDrag] = useState<{ from: number; to: number } | null>(null);
+  const plotRef = useRef<PlotArea | null>(null);
+  // Drag positions in px from the container's left edge, plus the plot's vertical extent for the overlay.
+  const [drag, setDrag] = useState<{
+    from: number;
+    to: number;
+    top: number;
+    height: number;
+  } | null>(null);
 
-  let points: Point[] = bars.map((bar) => ({
-    t: Date.parse(bar.timestamp),
-    close: bar.close,
-  }));
+  let points = toRows(series);
 
   const formatTick = (period: TickPeriod) => (t: number) => {
     // Hourly ticks can land off the hour, e.g. on the 9:30 open; "9 AM" would misplace them.
@@ -96,7 +137,6 @@ export default function PriceChart({
         ticks={session.ticks}
         tickFormatter={formatTick("1Hour")}
         tick={AXIS_TICK}
-        height={X_AXIS_HEIGHT}
       />
     );
   } else {
@@ -109,23 +149,22 @@ export default function PriceChart({
         interval={0}
         tickFormatter={formatTick(period)}
         tick={AXIS_TICK}
-        height={X_AXIS_HEIGHT}
       />
     );
   }
 
-  const plotWidth = () =>
-    containerRef.current!.clientWidth - PLOT_LEFT - MARGIN.right;
-
-  const clampX = (x: number) =>
-    Math.min(Math.max(x, PLOT_LEFT), PLOT_LEFT + plotWidth());
+  const clampX = (x: number) => {
+    const plot = plotRef.current!;
+    return Math.min(Math.max(x, plot.x), plot.x + plot.width);
+  };
 
   const localX = (e: PointerEvent) =>
     e.clientX - containerRef.current!.getBoundingClientRect().left;
 
   /** The time of the bar nearest to an x position. */
   const timeAt = (x: number) => {
-    const fraction = (x - PLOT_LEFT) / plotWidth();
+    const plot = plotRef.current!;
+    const fraction = (x - plot.x) / plot.width;
     if (domain) {
       const t = domain[0] + fraction * (domain[1] - domain[0]);
       return points.reduce((best, p) =>
@@ -137,13 +176,14 @@ export default function PriceChart({
   };
 
   const onPointerDown = (e: PointerEvent<HTMLDivElement>) => {
+    const plot = plotRef.current;
+    if (e.button !== 0 || !plot) return;
     const x = localX(e);
     const y = e.clientY - e.currentTarget.getBoundingClientRect().top;
-    const inPlot =
-      x === clampX(x) && y >= MARGIN.top && y <= MARGIN.top + PLOT_HEIGHT;
-    if (e.button !== 0 || !inPlot) return;
+    const inPlot = x === clampX(x) && y >= plot.y && y <= plot.y + plot.height;
+    if (!inPlot) return;
     e.currentTarget.setPointerCapture(e.pointerId);
-    setDrag({ from: x, to: x });
+    setDrag({ from: x, to: x, top: plot.y, height: plot.height });
   };
 
   const onPointerMove = (e: PointerEvent<HTMLDivElement>) => {
@@ -170,20 +210,35 @@ export default function PriceChart({
     >
       <ResponsiveContainer width="100%" height={HEIGHT}>
         <LineChart data={points} margin={MARGIN}>
-          <CartesianGrid vertical={false} />
+          {/* Gridlines follow the first ticker's axis. */}
+          <PlotAreaTracker plotRef={plotRef} />
+          <CartesianGrid vertical={false} yAxisId={series[0].ticker} />
           {xAxis}
           {/* interval={0} stops recharts nudging the top label down to fit; the top margin gives it room. */}
-          <YAxis
-            domain={["auto", "auto"]}
-            tick={AXIS_TICK}
-            interval={0}
-            width={Y_AXIS_WIDTH}
-          />
+          {series.map(({ ticker, color }) => (
+            <YAxis
+              key={ticker}
+              yAxisId={ticker}
+              domain={["auto", "auto"]}
+              // Colored like the ticker's line, so it's clear which axis is whose. Auto width is the widest
+              // label plus tickMargin; shifting the labels back by the extra margin (dx) leaves the gap on their
+              // outer side, between axes, without moving them off their tick marks.
+              tick={{ ...AXIS_TICK, fill: color, dx: Y_AXIS_GAP }}
+              tickMargin={TICK_MARGIN + Y_AXIS_GAP}
+              stroke={color}
+              interval={0}
+              // Sized to its labels rather than recharts' fixed 60px.
+              width="auto"
+            />
+          ))}
           <Tooltip
             labelFormatter={(t) => formatBarTime(Number(t), timeframe)}
-            // Show just the price; the label already says whether it's a close or a time of day.
-            formatter={(value) => [`${Number(value).toFixed(2)} USD`, ""]}
-            separator=""
+            // e.g. "AAPL 254.10 USD"; the label already says whether it's a close or a time of day.
+            formatter={(value, name) => [
+              `${Number(value).toFixed(2)} USD`,
+              name,
+            ]}
+            separator=" "
             contentStyle={{
               margin: 0,
               padding: "4px 8px",
@@ -193,19 +248,23 @@ export default function PriceChart({
               fontSize: 12,
               whiteSpace: "nowrap",
             }}
-            itemStyle={{
-              display: "block",
-              padding: 0,
-              color: "#000",
-              fontWeight: 500,
-            }}
+            // Items take their line's color, matching the ticker headings.
+            itemStyle={{ display: "block", padding: 0, fontWeight: 500 }}
           />
-          <Line
-            dataKey="close"
-            strokeWidth={1.5}
-            dot={false}
-            isAnimationActive={false}
-          />
+          {series.map(({ ticker, color }) => (
+            <Line
+              key={ticker}
+              yAxisId={ticker}
+              name={ticker}
+              // A function rather than a string key, since recharts reads "BRK.B" as a nested path.
+              dataKey={(row: Row) => row.values[ticker] ?? null}
+              stroke={color}
+              strokeWidth={1.5}
+              dot={false}
+              connectNulls
+              isAnimationActive={false}
+            />
+          ))}
         </LineChart>
       </ResponsiveContainer>
       {drag && (
@@ -214,8 +273,8 @@ export default function PriceChart({
           style={{
             left: Math.min(drag.from, drag.to),
             width: Math.abs(drag.to - drag.from),
-            top: MARGIN.top,
-            height: PLOT_HEIGHT,
+            top: drag.top,
+            height: drag.height,
           }}
         />
       )}
