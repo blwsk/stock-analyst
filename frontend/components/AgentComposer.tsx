@@ -3,6 +3,8 @@
 import { useChat } from "@ai-sdk/react";
 import { ArrowUp, Check, LoaderCircle, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { useSWRConfig } from "swr";
 
 import WorkspacePreview from "@/components/WorkspacePreview";
@@ -62,12 +64,15 @@ export default function AgentComposer() {
                     switch (part.type) {
                       case "text":
                         return (
-                          <p
+                          // The agent replies in markdown; GFM adds its tables, strikethrough and bare links.
+                          <div
                             key={key}
-                            className="whitespace-pre-wrap text-zinc-900"
+                            className="prose prose-sm prose-zinc max-w-none"
                           >
-                            {part.text}
-                          </p>
+                            <Markdown remarkPlugins={[remarkGfm]}>
+                              {part.text}
+                            </Markdown>
+                          </div>
                         );
                       case "tool-web_search":
                         return (
