@@ -1,5 +1,7 @@
 # Stock Analyst
 
+![A workspace charting EBAY and META over one day, with a note's tooltip, the price table and the notes list](docs/screenshot.png)
+
 A full stack app for exploring S&P 500 stock price data.
 
 - **Workspaces:** chart one or more tickers over a preset range or a window dragged out on the chart. Each workspace saves its chart options and refreshes prices every 15 seconds.
