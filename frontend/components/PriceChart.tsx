@@ -11,6 +11,7 @@ import {
   CartesianGrid,
   Line,
   LineChart,
+  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   usePlotArea,
@@ -19,14 +20,21 @@ import {
   type PlotArea,
 } from "recharts";
 
+import NotePopover from "@/components/NotePopover";
 import {
+  containingBar,
   periodTicks,
   sessionAxis,
   type Point,
   type TickPeriod,
 } from "@/lib/chartAxis";
-import { formatBarTime, formatMarketTime, marketParts } from "@/lib/marketTime";
-import type { Bar, Range, Timeframe } from "@/lib/types";
+import {
+  formatBarTime,
+  formatMarketTime,
+  formatNoteTime,
+  marketParts,
+} from "@/lib/marketTime";
+import type { Bar, Note, Range, Timeframe } from "@/lib/types";
 
 export type Series = { ticker: string; data: Bar[]; color: string };
 
@@ -57,6 +65,21 @@ const Y_AXIS_GAP = 8;
 const TICK_MARGIN = 2;
 // Shorter drags are treated as clicks.
 const MIN_DRAG_PX = 3;
+const NOTE_COLOR = "#f59e0b";
+
+/** Notes grouped by the visible bar they snap to, in time order, so notes on the same bar share one line. */
+function notesByBar(
+  notes: Note[],
+  points: readonly Point[],
+  timeframe: Timeframe
+): Map<number, Note[]> {
+  const bars = new Map<number, Note[]>();
+  for (const note of notes) {
+    const t = containingBar(points, Date.parse(note.at), timeframe);
+    if (t !== null) bars.set(t, [...(bars.get(t) ?? []), note]);
+  }
+  return bars;
+}
 
 const MINUTES: Intl.DateTimeFormatOptions = {
   hour: "numeric",
@@ -91,13 +114,21 @@ export default function PriceChart({
   series,
   range,
   timeframe,
+  notes,
+  noteMode,
   onSelect,
+  onCreateNote,
 }: {
   series: Series[];
   /** null for a custom start/end window. */
   range: Range | null;
   timeframe: Timeframe;
+  notes: Note[];
+  /** When on, clicking the chart places a note instead of dragging out a window. */
+  noteMode: boolean;
   onSelect: (start: number, end: number) => void;
+  /** Resolves to whether the note was saved. */
+  onCreateNote: (at: number, content: string) => Promise<boolean>;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const plotRef = useRef<PlotArea | null>(null);
@@ -108,6 +139,14 @@ export default function PriceChart({
     top: number;
     height: number;
   } | null>(null);
+  // Where a note is being written: the clicked bar's time, and the click position for the popover.
+  const [draft, setDraft] = useState<{
+    at: number;
+    x: number;
+    y: number;
+  } | null>(null);
+  // Leaving note mode (by saving, or toggling it off) discards the draft.
+  if (!noteMode && draft) setDraft(null);
 
   let points = toRows(series);
 
@@ -153,6 +192,9 @@ export default function PriceChart({
     );
   }
 
+  // Computed from the final points, after the 1D session axis clamps bars to the open.
+  const noteBars = notesByBar(notes, points, timeframe);
+
   const clampX = (x: number) => {
     const plot = plotRef.current!;
     return Math.min(Math.max(x, plot.x), plot.x + plot.width);
@@ -182,6 +224,10 @@ export default function PriceChart({
     const y = e.clientY - e.currentTarget.getBoundingClientRect().top;
     const inPlot = x === clampX(x) && y >= plot.y && y <= plot.y + plot.height;
     if (!inPlot) return;
+    if (noteMode) {
+      setDraft({ at: timeAt(x), x, y });
+      return;
+    }
     e.currentTarget.setPointerCapture(e.pointerId);
     setDrag({ from: x, to: x, top: plot.y, height: plot.height });
   };
@@ -202,7 +248,7 @@ export default function PriceChart({
   return (
     <div
       ref={containerRef}
-      className="relative cursor-crosshair touch-none select-none"
+      className={`relative touch-none select-none ${noteMode ? "cursor-cell" : "cursor-crosshair"}`}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
@@ -232,24 +278,37 @@ export default function PriceChart({
             />
           ))}
           <Tooltip
-            labelFormatter={(t) => formatBarTime(Number(t), timeframe)}
-            // e.g. "AAPL 254.10 USD"; the label already says whether it's a close or a time of day.
-            formatter={(value, name) => [
-              `${Number(value).toFixed(2)} USD`,
-              name,
-            ]}
-            separator=" "
-            contentStyle={{
-              margin: 0,
-              padding: "4px 8px",
-              backgroundColor: "#fff",
-              border: "1px solid #ccc",
-              borderRadius: 6,
-              fontSize: 12,
-              whiteSpace: "nowrap",
-            }}
-            // Items take their line's color, matching the ticker headings.
-            itemStyle={{ display: "block", padding: 0, fontWeight: 500 }}
+            content={({ active, payload, label }) =>
+              active && payload?.length ? (
+                <div className="w-max max-w-60 rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs shadow-sm">
+                  {/* The label says whether the prices are closes or a time of day's. */}
+                  <div className="whitespace-nowrap">
+                    {formatBarTime(Number(label), timeframe)}
+                  </div>
+                  {/* e.g. "AAPL 254.10 USD", in the line's color to match the ticker headings. */}
+                  {payload.map((entry) => (
+                    <div
+                      key={String(entry.name)}
+                      className="font-medium whitespace-nowrap"
+                      style={{ color: entry.color }}
+                    >
+                      {entry.name} {Number(entry.value).toFixed(2)} USD
+                    </div>
+                  ))}
+                  {noteBars.get(Number(label))?.map((note) => (
+                    <div
+                      key={note.id}
+                      className="mt-1 border-t border-zinc-200 pt-1"
+                    >
+                      <div className="text-zinc-500">
+                        {formatNoteTime(Date.parse(note.at))}
+                      </div>
+                      <p className="whitespace-pre-wrap">{note.content}</p>
+                    </div>
+                  ))}
+                </div>
+              ) : null
+            }
           />
           {series.map(({ ticker, color }) => (
             <Line
@@ -265,6 +324,22 @@ export default function PriceChart({
               isAnimationActive={false}
             />
           ))}
+          {[...noteBars.keys()].map((t) => (
+            <ReferenceLine
+              key={t}
+              x={t}
+              yAxisId={series[0].ticker}
+              stroke={NOTE_COLOR}
+              strokeDasharray="4 3"
+            />
+          ))}
+          {draft && (
+            <ReferenceLine
+              x={draft.at}
+              yAxisId={series[0].ticker}
+              stroke={NOTE_COLOR}
+            />
+          )}
         </LineChart>
       </ResponsiveContainer>
       {drag && (
@@ -276,6 +351,18 @@ export default function PriceChart({
             top: drag.top,
             height: drag.height,
           }}
+        />
+      )}
+      {draft && (
+        <NotePopover
+          // Remounted per click, so each placement starts from an empty note.
+          key={`${draft.at}-${draft.x}-${draft.y}`}
+          at={draft.at}
+          x={draft.x}
+          y={draft.y}
+          containerWidth={containerRef.current?.clientWidth ?? 0}
+          onCancel={() => setDraft(null)}
+          onSave={(content) => onCreateNote(draft.at, content)}
         />
       )}
     </div>

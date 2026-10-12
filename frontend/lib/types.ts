@@ -54,3 +54,12 @@ export type Workspace = {
   created_at: string;
   updated_at: string;
 };
+
+export type Note = {
+  id: string;
+  workspace_id: string;
+  content: string;
+  /** The time of the bar the note was placed on. */
+  at: string;
+  created_at: string;
+};

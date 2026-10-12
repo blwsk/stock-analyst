@@ -51,3 +51,23 @@ async def update_workspace(
     if row is None:
         raise NOT_FOUND
     return dict(row)
+
+
+@router.get("/{workspace_id}/notes", response_model=list[schemas.Note])
+async def list_notes(workspace_id: UUID, conn: asyncpg.Connection = Depends(get_connection)):
+    rows = await conn.fetch("SELECT * FROM notes WHERE workspace_id = $1 ORDER BY at, created_at", workspace_id)
+    return [dict(row) for row in rows]
+
+
+@router.post("/{workspace_id}/notes", response_model=schemas.Note, status_code=status.HTTP_201_CREATED)
+async def create_note(workspace_id: UUID, body: schemas.NoteCreate, conn: asyncpg.Connection = Depends(get_connection)):
+    try:
+        row = await conn.fetchrow(
+            "INSERT INTO notes (workspace_id, content, at) VALUES ($1, $2, $3) RETURNING *",
+            workspace_id,
+            body.content,
+            body.at,
+        )
+    except asyncpg.ForeignKeyViolationError as e:
+        raise NOT_FOUND from e
+    return dict(row)

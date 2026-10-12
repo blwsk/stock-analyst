@@ -118,3 +118,20 @@ export function sessionAxis<P extends Point>(
       .map((point) => ({ ...point, t: Math.max(point.t, open) })),
   };
 }
+
+/**
+ * The time of the bar containing `at`, or null if no visible bar does, so notes snap to whichever bars are shown
+ * (e.g. a note placed on a 5-minute bar lands on its day's bar in a daily chart).
+ */
+export function containingBar(
+  points: readonly Point[],
+  at: number,
+  timeframe: Timeframe
+): number | null {
+  let bar: Point | undefined;
+  for (const point of points) {
+    if (point.t > at) break;
+    bar = point;
+  }
+  return bar && at - bar.t < TIMEFRAME_MS[timeframe] ? bar.t : null;
+}

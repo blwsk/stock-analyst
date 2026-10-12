@@ -80,3 +80,9 @@ export function formatBarTime(ms: number, timeframe: Timeframe): string {
     ? date
     : `${date}, ${formatMarketTime(ms, { timeStyle: "short" })}`;
 }
+
+/** A note's time: just the date for notes on daily bars, which start at midnight. */
+export function formatNoteTime(ms: number): string {
+  const { hour, minute } = marketParts(ms);
+  return formatBarTime(ms, hour === 0 && minute === 0 ? "1Day" : "1Min");
+}

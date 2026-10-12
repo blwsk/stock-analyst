@@ -90,3 +90,18 @@ class Workspace(BaseModel):
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class NoteCreate(BaseModel):
+    content: str = Field(min_length=1)
+    at: datetime
+
+
+class Note(BaseModel):
+    id: UUID
+    workspace_id: UUID
+    content: str
+    at: datetime
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
