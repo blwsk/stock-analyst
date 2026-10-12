@@ -1,0 +1,14 @@
+{
+  "lockfileVersion": 1,
+  "workspaces": {
+    "": {
+      "name": "stock-analyst",
+      "devDependencies": {
+        "@hspak/gopm3": "^1.1.0",
+      },
+    },
+  },
+  "packages": {
+    "@hspak/gopm3": ["@hspak/gopm3@1.1.0", "", { "bin": { "gopm3": "src/index.js" } }, "sha512-aK+kR9nhFk2KP6TStwcvYpzQGYJfAYUOwDQvpWqbI5poobIF/0o2j+yCUQK1D/KXNspQN1QGKgG1SVvHwhoJ7A=="],
+  }
+}

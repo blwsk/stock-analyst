@@ -1,0 +1,16 @@
+[
+  {
+    "name": "backend",
+    "command": "make",
+    "args": ["local-backend"],
+    "restart_delay": 10000,
+    "use_process_group": true
+  },
+  {
+    "name": "frontend",
+    "command": "make",
+    "args": ["local-frontend"],
+    "restart_delay": 10000,
+    "use_process_group": true
+  }
+]
